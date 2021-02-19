@@ -174,6 +174,7 @@ export KUBE_TEST_REPO_LIST=/path/to/repo_list.yaml
 to pull the images from. Sample file:
 
 ```yaml
+dockerLibraryRegistry: your-awesome-registry
 e2eRegistry: your-awesome-registry
 promoterE2eRegistry: your-awesome-registry
 gcRegistry: your-awesome-registry
