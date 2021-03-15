@@ -29,21 +29,27 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/tools/remotecommand"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
+	"k8s.io/kubernetes/pkg/features"
+	"k8s.io/kubernetes/pkg/kubelet/dockershim/libdocker"
 	mockclient "k8s.io/kubernetes/pkg/kubelet/dockershim/libdocker/testing"
 )
 
 func TestExecInContainer(t *testing.T) {
 
 	testcases := []struct {
-		description        string
-		timeout            time.Duration
-		returnCreateExec1  *dockertypes.IDResponse
-		returnCreateExec2  error
-		returnStartExec    error
-		returnInspectExec1 *dockertypes.ContainerExecInspect
-		returnInspectExec2 error
-		expectError        error
+		description             string
+		timeout                 time.Duration
+		startExecDelay          time.Duration
+		returnCreateExec1       *dockertypes.IDResponse
+		returnCreateExec2       error
+		returnStartExec         error
+		returnInspectExec1      *dockertypes.ContainerExecInspect
+		returnInspectExec2      error
+		expectError             error
+		disableExecProbeTimeout bool
 	}{{
 		description:       "ExecInContainer succeeds",
 		timeout:           time.Minute,
@@ -99,6 +105,17 @@ func TestExecInContainer(t *testing.T) {
 			Pid:         100},
 		returnInspectExec2: nil,
 		expectError:        context.DeadlineExceeded,
+	}, {
+		description:             "[ExecProbeTimeout=false] StartExec that takes longer than the probe timeout returns a error",
+		timeout:                 500 * time.Millisecond,
+		startExecDelay:          1 * time.Second,
+		returnCreateExec1:       &dockertypes.IDResponse{ID: "12345678"},
+		returnCreateExec2:       nil,
+		returnStartExec:         fmt.Errorf("error in StartExec()"),
+		returnInspectExec1:      nil,
+		returnInspectExec2:      nil,
+		expectError:             fmt.Errorf("error in StartExec()"),
+		disableExecProbeTimeout: true,
 	}}
 
 	eh := &NativeExecHandler{}
@@ -110,13 +127,17 @@ func TestExecInContainer(t *testing.T) {
 	var resize <-chan remotecommand.TerminalSize
 
 	for _, tc := range testcases {
+		if tc.disableExecProbeTimeout {
+			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.ExecProbeTimeout, false)()
+		}
+
 		t.Logf("TestCase: %q", tc.description)
 
 		mockClient := mockclient.NewMockInterface(ctrl)
 		mockClient.EXPECT().CreateExec(gomock.Any(), gomock.Any()).Return(
 			tc.returnCreateExec1,
 			tc.returnCreateExec2)
-		mockClient.EXPECT().StartExec(gomock.Any(), gomock.Any(), gomock.Any()).Return(tc.returnStartExec)
+		mockClient.EXPECT().StartExec(gomock.Any(), gomock.Any(), gomock.Any()).Do(func(_ string, _ dockertypes.ExecStartCheck, _ libdocker.StreamOptions) { time.Sleep(tc.startExecDelay) }).Return(tc.returnStartExec)
 		mockClient.EXPECT().InspectExec(gomock.Any()).Return(
 			tc.returnInspectExec1,
 			tc.returnInspectExec2)
