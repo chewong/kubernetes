@@ -231,6 +231,25 @@ var _ = SIGDescribe("Probing container", func() {
 
 	/*
 		Release: v1.20
+		Testname: Pod liveness probe, container exec timeout, restart
+		Description: A Pod is created with liveness probe with a Exec action on the Pod. If the liveness probe call does not return within the timeout specified, liveness probe MUST restart the Pod. When ExecProbeTimeout feature gate is disabled, the timeout is ignored BUT a failing liveness probe MUST restart the Pod.
+	*/
+	ginkgo.It("should be restarted with a failing exec liveness probe that took longer than the timeout [NodeConformance]", func() {
+		// The ExecProbeTimeout feature gate exists to allow backwards-compatibility with pre-1.20 cluster behaviors, where livenessProbe timeouts were ignored
+		// If ExecProbeTimeout feature gate is disabled, timeout enforcement for exec livenessProbes is disabled, but a failing liveness probe MUST still trigger a restart
+		cmd := []string{"/bin/sh", "-c", "sleep 600"}
+		livenessProbe := &v1.Probe{
+			Handler:             execHandler([]string{"/bin/sh", "-c", "sleep 10 & exit 1"}),
+			InitialDelaySeconds: 15,
+			TimeoutSeconds:      1,
+			FailureThreshold:    1,
+		}
+		pod := busyBoxPodSpec(nil, livenessProbe, cmd)
+		RunLivenessTest(f, pod, 1, defaultObservationTimeout)
+	})
+
+	/*
+		Release: v1.20
 		Testname: Pod readiness probe, container exec timeout, not ready
 		Description: A Pod is created with readiness probe with a Exec action on the Pod. If the readiness probe call does not return within the timeout specified, readiness probe MUST not be Ready.
 	*/
